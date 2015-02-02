@@ -1,0 +1,674 @@
+<?xml version="1.0"?>
+<s:WindowedApplication
+        xmlns:fx="http://ns.adobe.com/mxml/2009"
+        xmlns:s="library://ns.adobe.com/flex/spark"
+        xmlns:ui="com.sudo.ui.*"
+        minWidth="920" minHeight="630"
+        width="920" height="630"
+        preloader="assets.preloader.SudoPreloader"
+        usePreloader="true"
+        initialize="nativeWindowSetup()"
+        creationComplete="main()"
+        close="unmain()"
+        frameRate="30"
+        >
+    <fx:Style source="assets/style.css"/>
+    <fx:Script><![CDATA[
+        import air.update.ApplicationUpdaterUI;
+        import air.update.events.UpdateEvent;
+
+        import com.sudo.classes.TrafficData;
+        import com.sudo.enum.LooperEnum;
+        import com.sudo.enum.TrafficFlowEnum;
+        import com.sudo.events.ClientConnectionEvent;
+        import com.sudo.events.TrafficBytesEvent;
+        import com.sudo.network.ReplayServerSocket;
+        import com.sudo.network.ServerSocketConfig;
+        import com.sudo.util.air.WindowTracker;
+        import com.version.Version;
+
+        import mx.events.CloseEvent;
+        import mx.events.CollectionEvent;
+        import mx.events.FlexNativeMenuEvent;
+
+        import org.apache.flex.collections.VectorCollection;
+
+        import spark.components.Alert;
+        import spark.formatters.DateTimeFormatter;
+
+        import nz.co.codec.flexorm.EntityManager;
+
+        import com.lazarecki.MacOSFullScreenANE;
+
+        private var entityManager:EntityManager = EntityManager.instance;
+
+        private var lastTrafficItem:Date = new Date();
+        private var sequence:uint = 0;
+        private var _trafficVector:Vector.<TrafficData> = new Vector.<TrafficData>;
+        [Bindable]
+        private var trafficData:VectorCollection = new VectorCollection(_trafficVector);
+        [Bindable]
+        private var toggleLogo:Boolean = true;
+        private var randomLogo:Number = .99;
+        private var updateStatsTimer:Timer;
+        private var currentFrameRate:Number = 0;
+        private var lastFrameRateUpdate:int = 0;
+        private var frameCount:int = 0;
+
+        private var currentRateIn:uint = 0;
+        private var currentRateOut:uint = 0;
+        private var lastBandwidthRateUpdate:int = 0;
+        private var byteInCount:int = 0;
+        private var byteOutCount:int = 0;
+
+        private var windowTracker:WindowTracker;
+        private var appUpdater:ApplicationUpdaterUI;
+
+        private var sqlConnection:SQLConnection;
+        private var macOSFullScreen:MacOSFullScreenANE;
+        private var proxyServer:ReplayServerSocket;
+        private var playModeTimer:Timer = null;
+        private var _playMode:Boolean = true;
+        private function set playMode(mode:Boolean):void {
+            _playMode = mode;
+            if (mode == true) {
+                proxyServer.removeEventListener(TrafficBytesEvent.TRAFFICBYTESEVENT, onTrafficEvent);
+                proxyServer.addEventListener(ClientConnectionEvent.CLIENTCONNECTION, onClientConnectionEvent);
+
+                sequence = 0;
+                if (trafficData.length > 0) {
+                    trafficDataGrid.setSelectedIndex(sequence);
+                }
+            } else {
+                proxyServer.addEventListener(TrafficBytesEvent.TRAFFICBYTESEVENT, onTrafficEvent);
+                proxyServer.removeEventListener(ClientConnectionEvent.CLIENTCONNECTION, onClientConnectionEvent);
+
+                if (trafficData.length > 0) {
+                    sequence = trafficData.length;
+                    trafficDataGrid.setSelectedIndex(trafficData.length - 1);
+                } else {
+                    sequence = 0;
+                }
+            }
+            recordUIGroup.enabled = !mode;
+            proxyServer.playMode = mode;
+            onPlayClickHandler(null);
+        }
+
+        private function get playMode():Boolean {
+            return _playMode;
+        }
+
+        private var _live:Boolean = true;
+        private function get live():Boolean {
+            return _live;
+        }
+
+        private function set live(tivo:Boolean):void {
+            if (!_live) {
+                trafficData.enableAutoUpdate();
+                liveButton.label = "Freeze";
+            } else {
+                trafficData.disableAutoUpdate();
+                liveButton.label = "Live";
+            }
+            _live = tivo;
+        }
+
+        private function addMenuItem(name:String, separatorBefore:Boolean = false, selectCallback:Function = null):void {
+            var item:ContextMenuItem = new ContextMenuItem(name, separatorBefore);
+            if (selectCallback != null) {
+                item.addEventListener(Event.SELECT, selectCallback);
+            }
+            contextMenu.items.push(item);
+        }
+
+        private function main():void {
+            setUpFlexORM();
+            title = Version.BUILDSTRING;
+            addMenuItem('Version ' + Version.VERSION + " - " + Version.RELEASETYPE);
+            addMenuItem('Build ' + Version.BUILDTIME);
+
+            addMenuItem('Usage Wiki...', true, function (ev:*):void {
+                navigateToURL(new URLRequest('https://github.com/Sudo-Wars/SudoWire/wiki'));
+            });
+            addMenuItem('Report issues...', false, function (ev:*):void {
+                navigateToURL(new URLRequest('https://github.com/Sudo-Wars/SudoWire/issues'));
+            });
+            addMenuItem('Check for updates...', false, function (ev:*):void {
+                appUpdater.isDownloadUpdateVisible = true;
+                appUpdater.isDownloadProgressVisible = true;
+                appUpdater.isCheckForUpdateVisible = true;
+                appUpdater.checkNow();
+            });
+            if (Capabilities.os.indexOf("Mac OS") >= 0) { // example:  "Mac OS 10.10.2"
+                addMenuItem('Toggle Full Screen', false, function (ev:*):void {
+                    macOSFullScreen.enableFullScreen();
+                    macOSFullScreen.toggleFullScreen();
+                });
+
+                var menu:NativeMenu = NativeApplication.nativeApplication.menu;
+                menu.addEventListener(FlexNativeMenuEvent.ITEM_CLICK, onMenuHandler);
+                var appLevelMenu:NativeMenuItem = menu.getItemAt(1); //"File"
+                var nativeMenuItem:NativeMenuItem = new NativeMenuItem("", true);
+                appLevelMenu.submenu.addItem(nativeMenuItem);
+                nativeMenuItem = new NativeMenuItem("Save All", false);
+                nativeMenuItem.keyEquivalent = "s";
+                nativeMenuItem.keyEquivalentModifiers = [Keyboard.COMMAND];
+                nativeMenuItem.data = "SAVETRAFFIC";
+                nativeMenuItem.addEventListener(FlexNativeMenuEvent.ITEM_CLICK, onMenuHandler);
+                appLevelMenu.submenu.addItemAt(nativeMenuItem, 0);
+
+                appLevelMenu = menu.getItemAt(2); //"Edit"
+                nativeMenuItem = new NativeMenuItem("", true);
+                appLevelMenu.submenu.addItem(nativeMenuItem);
+                nativeMenuItem = new NativeMenuItem("Clear Traffic", false);
+                nativeMenuItem.keyEquivalent = "t";
+                nativeMenuItem.keyEquivalentModifiers = [Keyboard.COMMAND];
+                nativeMenuItem.data = "CLEARTRAFFIC";
+                nativeMenuItem.addEventListener(FlexNativeMenuEvent.ITEM_CLICK, onMenuHandler);
+                appLevelMenu.submenu.addItem(nativeMenuItem);
+
+                appLevelMenu = new NativeMenuItem("View", false);
+                nativeMenuItem = new NativeMenuItem("", true);
+                var subMenu:NativeMenu = new NativeMenu();
+                appLevelMenu.submenu = subMenu;
+                appLevelMenu.submenu.addItem(nativeMenuItem);
+                nativeMenuItem = new NativeMenuItem("Enter Full Screen", false);
+                nativeMenuItem.keyEquivalentModifiers = [Keyboard.COMMAND];
+                nativeMenuItem.keyEquivalent = "f";
+                nativeMenuItem.data = "FULLSCREEN";
+                nativeMenuItem.addEventListener(Event.SELECT, onMenuHandler);
+                appLevelMenu.submenu.addItem(nativeMenuItem);
+                menu.addItemAt(appLevelMenu, 3);
+            }
+
+            appUpdater = new ApplicationUpdaterUI();
+            appUpdater.configurationFile = new File('app:/updateConfig.xml');
+            if (Version.TESTING) {
+                appUpdater.addEventListener(UpdateEvent.INITIALIZED, function (ev:Event):void {
+                    appUpdater.checkNow();
+                });
+            }
+            appUpdater.initialize();
+
+            proxyServer = new ReplayServerSocket();
+            if (!proxyServer.listening) {
+                Alert.show("Failed to bind to :" + ServerSocketConfig.localAddress + ":" + ServerSocketConfig.localPort, "Failure to Bind", 4, null, bindingFailureClose);
+            }
+
+            callLater(LoadTrafficData);
+            trafficData.addEventListener(CollectionEvent.COLLECTION_CHANGE, trafficDataChange);
+
+            windowTracker = new WindowTracker(SharedObject.getLocal('SudoWire.preferences'), nativeWindow);
+            windowTracker.restore();
+            windowTracker.startTracking();
+            this.addEventListener(Event.ENTER_FRAME, enterFrameHandler);
+        }
+
+        private function unmain():void {
+            proxyServer.close();
+        }
+
+        private function nativeWindowSetup():void {
+            macOSFullScreen = new MacOSFullScreenANE(!Version.TESTING);
+            macOSFullScreen.enableFullScreen();
+        }
+
+        private function bindingFailureClose(event:CloseEvent):void {
+            if (proxyServer.listening) {
+                proxyServer.close();
+                proxyServer = null;
+            }
+            close();
+        }
+
+        private static function traceDisplayList(displayObject:DisplayObject, maxDepth:int = 100, skipClass:Class = null, levelSpace:String = " ", currentDepth:int = 0):void {
+            if (skipClass != null) if (displayObject is skipClass) return;
+            trace(levelSpace + displayObject.name);  // or any function that clean instance name
+            if (displayObject is DisplayObjectContainer && currentDepth < maxDepth) {
+                for (var i:int = 0; i < DisplayObjectContainer(displayObject).numChildren; i++) {
+                    if (DisplayObjectContainer(displayObject).getChildAt(i).hasOwnProperty('enabled')) {
+                        (DisplayObjectContainer(displayObject).getChildAt(i) as Object).enabled = false;
+                    }
+                    traceDisplayList(DisplayObjectContainer(displayObject).getChildAt(i), maxDepth, skipClass, levelSpace + "    ", currentDepth + 1);
+                }
+            }
+        }
+
+        private function setUpFlexORM():void {
+            var dbFile:File = File.applicationStorageDirectory.resolvePath("sudowire.db");
+            sqlConnection = new SQLConnection();
+            sqlConnection.open(dbFile);
+            entityManager.sqlConnection = sqlConnection;
+        }
+
+        private function createTrafficData(direction:String, data:ByteArray):TrafficData {
+            sequence++;
+            var trafficItem:TrafficData = new TrafficData();
+            trafficItem.itemNo = sequence;
+            trafficItem.server = "0";
+            trafficItem.userName = "@";
+            trafficItem.time = new Date();
+            trafficItem.timeDiff = (trafficItem.time.getTime() - lastTrafficItem.getTime());
+            lastTrafficItem = trafficItem.time;
+            trafficItem.direction = direction;
+            if (data) {
+                if (data.length > 0) {
+                    var gameData:Object = data.readObject();
+                    if (gameData) {
+                        if (gameData.hasOwnProperty("host")) {
+                            trafficItem.cmd = "Remote Connect";
+                            trafficItem.data = gameData;
+                            // Clear grid as a new session has started
+
+                        } else if (gameData.hasOwnProperty("cmd")) {
+                            trafficItem.cmd = gameData.cmd;
+                            trafficItem.data = gameData.data;
+                            trafficItem.raw = data;
+                        }
+                    }
+                }
+            }
+            return trafficItem;
+        }
+
+        private function trafficDataChange(event:Event):void {
+            autoScrollDataGrid();
+        }
+
+        private function enterFrameHandler(ev:Event):void {
+            frameCount++;
+            var now:int = getTimer();
+            var diff:int = now - lastFrameRateUpdate;
+            if (diff > 1000) {
+                currentFrameRate = frameCount / (diff / 1000);
+                lastFrameRateUpdate = now;
+                frameCount = 0;
+            }
+        }
+
+        private function updateStats():void {
+            appStats.addPoint(0, System.privateMemory, currentFrameRate);
+        }
+
+        private function truncateTrafficData():void {
+            if (numericStepper.value == 0) return;
+            if (checkBoxTruncate.selected) {
+                while (trafficData.length >= numericStepper.value) {
+                    // delete first row : FIFO
+                    if (trafficData.length > 0) {
+                        trafficData.removeItemAt(0);
+                    }
+                }
+            }
+        }
+
+        private function saveTrafficClickHandler(event:Event):void {
+            // Clear old session database records
+            ClearTrafficDataFromDB();
+            // Save new session database records
+            try {
+                entityManager.startTransaction();
+                trace("Saving " + trafficData.toArray().length + " records");
+                for each (var sratch:TrafficData in trafficData) {
+                    entityManager.save(sratch);
+                }
+                entityManager.endTransaction();
+            } catch (e:Error) {
+                trace(e.message);
+            }
+        }
+
+        private function updateData():void {
+            var foo:TrafficData = trafficDataGrid.selectedItem as TrafficData;
+            if (foo) {
+                if (foo.hasOwnProperty("data")) {
+                    try {
+                        cmdData.text = JSON.stringify(foo.data);
+                    } catch (e:Error) {
+
+                    }
+                }
+            }
+        }
+
+        private function addGridData(data:TrafficData):void {
+            trafficData.addItem(data);
+        }
+
+        private function autoScrollDataGrid():void {
+            if (autoScroll.selected) {
+                trafficDataGrid.setSelectedIndex(trafficData.length - 1);
+                trafficDataGrid.validateNow();
+                trafficDataGrid.grid.verticalScrollPosition = int.MAX_VALUE;
+                callLater(updateData);
+            }
+        }
+
+        private static function dateFormatter(item:Object, column:GridColumn):String {
+            var dateFormatter:DateTimeFormatter = new DateTimeFormatter();
+            dateFormatter.dateTimePattern = "HH:mm:ss";
+            return dateFormatter.format(new Date(item.time));
+        }
+
+        private function sendClientData(event:Event):void {
+            playModeTimer.reset();
+            if ((trafficData.length > sequence) && (sequence != uint.MAX_VALUE)) {
+                if (autoScroll.selected) {
+                    trafficDataGrid.setSelectedIndex(sequence);
+                    trafficDataGrid.ensureCellIsVisible(trafficDataGrid.selectedIndex);
+                    callLater(updateData);
+                }
+                var current:TrafficData = trafficData.getItemAt(sequence) as TrafficData;
+                var next:TrafficData;
+                var delay:Number;
+                if (trafficData.length > sequence + 1) {
+                    next = trafficData.getItemAt(sequence + 1) as TrafficData;
+                    delay = next.timeDiff;
+                } else {
+                    delay = 0;
+                }
+                sequence++;
+                if (current.direction == TrafficFlowEnum.IN) {
+                    try {
+                        try {
+                            var foo:Object = current.raw.readObject();
+                            if (foo.cmd == "server.LoginResponse") {
+                                trace(current.raw.toString());
+                            }
+                        } catch (e:Error) {
+                        }
+                        proxyServer.sendDataToGameClient(current.raw);
+                    } catch (e:Error) {
+                        // If the game client closes, the socket will still report open for a brief time and
+                        // thus a null object is accessed within the ReplayServerSocket/ByPassServerSocket....
+                        sequence = uint.MAX_VALUE; // this will cause next cycle to abort
+                    }
+                }
+                playModeTimer.delay = delay;
+//                _playModeTimer.delay = 200;
+                playModeTimer.start();
+            } else {
+                if (sequence != uint.MAX_VALUE) {
+                    if (loopButton.loop == LooperEnum.LOOPALL) { // restart sequence
+                        sequence = 0;
+                        if (autoScroll.selected) {
+                            trafficDataGrid.setSelectedIndex(sequence);
+                            trafficDataGrid.ensureCellIsVisible(trafficDataGrid.selectedIndex);
+                            callLater(updateData);
+                        }
+                        playModeTimer.delay = 5000;
+                        playModeTimer.start();
+                    }
+                } else {
+                    sequence = 0;
+                    playModeTimer.removeEventListener(TimerEvent.TIMER, sendClientData);
+                    playModeTimer = null;
+                    proxyServer.addEventListener(ClientConnectionEvent.CLIENTCONNECTION, onClientConnectionEvent);
+                }
+            }
+        }
+
+        private function ClearTrafficGrid():void {
+            if (live) {
+                live = false;
+            }
+            ClearTrafficData();
+        }
+
+        private function LoadTrafficData():void {
+            try {
+                trafficData.disableAutoUpdate();
+                trafficData.removeAll();
+                autoScroll.selected = false;
+                var objectsFromDataBase:Array = entityManager.findAll(TrafficData);
+                // TODO: Quick hack, how do you pass orderBy to entityManager.....
+                objectsFromDataBase.sortOn("itemNo", Array.NUMERIC);
+                if (objectsFromDataBase.length > 0) {
+                    playMode = true;
+                } else {
+                    playMode = false;
+                }
+                for each (var obj:TrafficData in objectsFromDataBase) {
+                    trafficData.addItem(obj);
+                }
+                sequence = trafficData.length;
+            } catch (e:Error) {
+                trace(e.message);
+            } finally {
+                trafficData.enableAutoUpdate();
+                autoScroll.selected = true;
+            }
+        }
+
+        private function ClearTrafficData():void {
+            trafficData.disableAutoUpdate();
+            trafficData.removeAll();
+            sequence = 0;
+            trafficData.enableAutoUpdate();
+        }
+
+        private function ClearTrafficDataFromDB():void {
+            try {
+                entityManager.startTransaction();
+                var traffic:Array = entityManager.findAll(TrafficData);
+                entityManager.removeAll(traffic);
+                entityManager.endTransaction();
+            } catch (e:Error) {
+                trace(e.message);
+            } finally {
+            }
+        }
+
+        private function onClientConnectionEvent(event:Event):void {
+            proxyServer.removeEventListener(ClientConnectionEvent.CLIENTCONNECTION, onClientConnectionEvent);
+            if (playModeTimer != null) {
+                playModeTimer.reset();
+                playModeTimer = null;
+            }
+            // start replay mode now.
+            if (trafficData.length > 0) {
+                sequence = 0;
+                playModeTimer = new Timer(5000, 1);
+                playModeTimer.addEventListener(TimerEvent.TIMER, sendClientData);
+                playModeTimer.start();
+            }
+        }
+
+        private function onTrafficEvent(event:TrafficBytesEvent):void {
+            var inB:int = 0;
+            var outB:int = 0;
+            if (event.direction == TrafficFlowEnum.IN) {
+                inB = event.bytes;
+            } else {
+                outB = event.bytes;
+            }
+            var data:TrafficData = createTrafficData(event.direction, event.data);
+            addGridData(data);
+            callLater(trafficGraph.addPoint, [inB, outB]);
+        }
+
+        private function onPlayClickHandler(event:Event):void {
+            if (event) {
+                playMode = !playMode;
+            }
+            if (!playMode) {
+                playButton.label = "Record Mode";
+            } else {
+                playButton.label = "Play Mode";
+            }
+        }
+
+        private function onLiveCickHandler(event:Event):void {
+            live = !live;
+        }
+
+        private function onClearTrafficClickHandler(event:Event):void {
+            ClearTrafficDataFromDB();
+            ClearTrafficGrid();
+        }
+
+        private function onUpdateStatsTimerHandler(event:TimerEvent):void {
+            updateStats();
+            if (Math.random() > randomLogo) {
+                toggleLogo = !toggleLogo;
+                if (randomLogo == .99) {
+                    randomLogo = .75
+                } else {
+                    randomLogo = .99
+                }
+            }
+        }
+
+        private function stats_creationCompleteHandler(event:Event):void {
+            updateStatsTimer = new Timer(500);
+            updateStatsTimer.addEventListener(TimerEvent.TIMER, onUpdateStatsTimerHandler);
+            updateStatsTimer.start();
+        }
+
+        private function onTrafficSearchChangeHandler(event:Event):void {
+
+        }
+
+        private function onTrafficSearchEnterHandler(event:Event):void {
+
+        }
+
+        private function onMenuHandler(event:Event):void {
+            var currentNativeMenuItem:NativeMenuItem = event.currentTarget as NativeMenuItem;
+            var menuData:String = currentNativeMenuItem.data.toString();
+            switch (menuData) {
+                case "SAVETRAFFIC":
+                    saveTrafficClickHandler(null);
+                    break;
+                case "CLEARTRAFFIC":
+                    onClearTrafficClickHandler(null);
+                    break;
+                case "FULLSCREEN":
+                    // TODO: Need to add a isFullScreen to the ANE
+                    // currentNativeMenuItem.label = "Exit Full Screen";
+
+                    // Hack: EnableFullScreen is not working correctly in the init anymore, startup timing issue?
+                    macOSFullScreen.enableFullScreen();
+                    macOSFullScreen.toggleFullScreen();
+                    break;
+            }
+        }
+        ]]></fx:Script>
+
+    <fx:Declarations>
+        <s:DateTimeFormatter id="trafficDateFormatter" dateTimePattern='HH:mm:ss'/>
+    </fx:Declarations>
+
+    <s:layout>
+        <s:VerticalLayout variableRowHeight="true"/>
+    </s:layout>
+    <s:VGroup width="100%" height="100%" verticalAlign="top">
+        <s:VGroup id="header" width="100%" height="30%">
+            <s:HGroup height="100%" width="100%">
+                <s:Image horizontalAlign="left" id="logo" styleName="logo" source="{logo.getStyle('source')}"
+                         visible="{toggleLogo}" includeInLayout="{toggleLogo}"/>
+                <s:Image horizontalAlign="left" id="logo2" styleName="logo" source="{logo.getStyle('source2')}"
+                         visible="{!toggleLogo}" includeInLayout="{!toggleLogo}"/>
+                <ui:StatsGraph id="appStats" width="100%" height="70"
+                               creationComplete="stats_creationCompleteHandler(event)"
+                               alpha="0.80"/>
+            </s:HGroup>
+            <s:HGroup width="100%" height="150">
+                <ui:BandwidthGraph id="trafficGraph" width="100%" height="100%"/>
+            </s:HGroup>
+        </s:VGroup>
+        <s:HGroup width="100%" height="100%" verticalAlign="bottom">
+            <s:Panel id="trafficPanel" title="" width="100%" height="100%">
+                <s:HGroup width="100%" height="100%">
+                    <s:VGroup width="100%" height="100%">
+                        <s:HGroup width="100%">
+                            <s:HGroup width="100%" verticalAlign="middle" id="recordUIGroup">
+                                <ui:SearchInput id="consoleSearch" change="onTrafficSearchChangeHandler(event)"
+                                                enter="onTrafficSearchEnterHandler(event)" enabled="false"
+                                        />
+                                <s:Spacer width="100%"/>
+                                <!--<s:Button id="recordButton" label="Pause" click="recordClickHandler(event);"/>-->
+                                <s:Button id="liveButton" label="Freeze" click="onLiveCickHandler(event);"/>
+                                <s:CheckBox id="checkBoxTruncate" label="Truncate@" enabled="false"
+                                            click="{numericStepper.enabled = (!numericStepper.enabled)}"/>
+                                <s:NumericStepper id="numericStepper" value="20" maximum="1000" stepSize="10"
+                                                  enabled="false"/>
+                                <s:Spacer width="100%"/>
+                                <s:Button label="Save" click="saveTrafficClickHandler(event)"/>
+                                <s:Button label="Clear" click="onClearTrafficClickHandler(event)"/>
+                                <s:Spacer width="100%"/>
+                            </s:HGroup>
+                            <s:HGroup>
+                                <s:CheckBox id="autoScroll" label="AutoScroll" selected="false"/>
+                                <s:Spacer width="100%"/>
+                                <s:Button id="playButton" label="Play Mode" click="onPlayClickHandler(event)"/>
+                                <ui:LoopButton id="loopButton" label="Loop" styleName="looper" visible="false"
+                                               loop="{LooperEnum.LOOPALL}"/>
+                            </s:HGroup>
+                        </s:HGroup>
+                        <s:HGroup height="100%" width="100%">
+                            <s:DataGrid id="trafficDataGrid" height="100%" width="65%"
+                                        editable="false" doubleClickEnabled="false" dragEnabled="false"
+                                        dataProvider="{trafficData}"
+                                        showDataTips="false"
+                                        sortableColumns="false"
+                                        multiColumnSortingEnabled="false"
+                                        borderVisible="true"
+                                        textAlign="right"
+                                        selectionChange="updateData();"
+                                        skinClass="com.sudo.skin.CenterHeadersDataGridSkin"
+                                        verticalScrollPolicy="on"
+                                    >
+                                <s:columns>
+                                    <s:ArrayList>
+                                        <s:GridColumn headerText="#" dataField="itemNo" width="100"/>
+                                        <s:GridColumn headerText="Time" dataField="time" labelFunction="dateFormatter" width="150">
+                                        </s:GridColumn>
+                                        <s:GridColumn headerText="Diff(ms)" dataField="timeDiff" width="100"/>
+                                        <s:GridColumn headerText="" maxWidth="32" minWidth="32" width="32">
+                                            <s:itemRenderer>
+                                                <fx:Component>
+                                                    <s:GridItemRenderer>
+                                                        <s:HGroup width="100%" height="100%">
+                                                            <s:BitmapImage id="upBitmapImage" width="100%" height="100%"
+                                                                           verticalAlign="middle"
+                                                                           includeInLayout="{data.direction == TrafficFlowEnum.OUT}"
+                                                                           visible="{data.direction == TrafficFlowEnum.OUT}"
+                                                                           verticalCenter="0" horizontalCenter="0"
+                                                                           source="@Embed(source='assets/images/upload_blue_32.png')"
+                                                                    />
+                                                            <s:BitmapImage id="downBitmapImage" width="100%"
+                                                                           height="100%" verticalAlign="middle"
+                                                                           includeInLayout="{data.direction == TrafficFlowEnum.IN}"
+                                                                           visible="{data.direction == TrafficFlowEnum.IN}"
+                                                                           verticalCenter="0" horizontalCenter="0"
+                                                                           source="@Embed(source='assets/images/download_green_32.png')"
+                                                                    />
+                                                        </s:HGroup>
+                                                        <fx:Script><![CDATA[
+                                                            import com.sudo.enum.TrafficFlowEnum;
+                                                            ]]></fx:Script>
+                                                    </s:GridItemRenderer>
+                                                </fx:Component>
+                                            </s:itemRenderer>
+                                        </s:GridColumn>
+                                        <s:GridColumn headerText="Cmd" dataField="cmd"/>
+                                    </s:ArrayList>
+                                </s:columns>
+                            </s:DataGrid>
+                            <s:VGroup width="35%" height="100%" horizontalAlign="right">
+                                <s:HGroup width="100%">
+                                    <s:Label text="Data:" textAlign="left"/>
+                                    <s:Spacer width="100%"/>
+                                </s:HGroup>
+                                <s:TextArea id="cmdData" height="100%" width="100%"/>
+                            </s:VGroup>
+                        </s:HGroup>
+                    </s:VGroup>
+                </s:HGroup>
+            </s:Panel>
+        </s:HGroup>
+    </s:VGroup>
+</s:WindowedApplication>

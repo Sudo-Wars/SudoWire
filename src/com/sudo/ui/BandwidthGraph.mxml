@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"
+         xmlns:s="library://ns.adobe.com/flex/spark"
+         creationComplete="main();"
+        >
+    <fx:Script>
+		<![CDATA[
+        private var points:Array = [];
+        private var _updateStatsTimer:Timer;
+        private var _inBytesTotal:uint = 0;
+        private var _outBytesTotal:uint = 0;
+
+        public function addPoint(inBytes:uint, outBytes:uint):void {
+            _inBytesTotal += inBytes;
+            _outBytesTotal += outBytes;
+        }
+
+        protected function main():void {
+            _updateStatsTimer = new Timer(1000);
+            _updateStatsTimer.addEventListener(TimerEvent.TIMER, updateStatsTimerHandler);
+            _updateStatsTimer.start();
+        }
+
+        protected function updateStatsTimerHandler(event:TimerEvent):void {
+            points.push({inCount: _inBytesTotal, outCount: _outBytesTotal});
+            _inBytesTotal = 0;
+            _outBytesTotal = 0;
+            invalidateDisplayList();
+        }
+
+        override protected function updateDisplayList(unscaledWidth:Number, unscaledHeight:Number):void {
+            super.updateDisplayList(unscaledWidth, unscaledHeight);
+
+            graph.graphics.clear();
+
+            graph.graphics.lineStyle(1, 0x00FF00, 0.6);
+            graph.graphics.beginFill(0x00FF00, .5);
+            drawProperty('inCount', unscaledWidth, unscaledHeight);
+
+            graph.graphics.lineStyle(1, 0x0000FF, 0.6);
+            graph.graphics.beginFill(0x0000FF, .5);
+            drawProperty('outCount', unscaledWidth, unscaledHeight);
+
+            if (points.length > 0) {
+                var lastPoint:Object = points[points.length - 1];
+                inRateLabel.text = 'IN: ' + Math.round(lastPoint['inCount']) + " B/s";
+                outRateLabel.text = 'OUT: ' + Math.round(lastPoint['outCount']) + " B/s";
+            }
+        }
+
+        private function drawProperty(name:String, unscaledWidth:Number, unscaledHeight:Number):void {
+            unscaledHeight -= 5;
+            var positionHeight:Number;
+            var unscaledHalfHeight:Number = unscaledHeight / 2;
+            if (name == "outCount") {
+                positionHeight = -unscaledHeight;
+                unscaledHalfHeight = -unscaledHalfHeight;
+            } else {
+                positionHeight = 0;
+            }
+            var start:int = Math.max(0, points.length - unscaledWidth);
+            var maxPoint:int = 0;
+            for (var iter:int = start; iter < points.length; iter++) {
+                maxPoint = Math.max(maxPoint, points[iter][name]) + 1;
+            }
+            if (maxPoint > 0) {
+                for (var iter2:int = start; iter2 < points.length; iter2++) {
+                    if (iter2 == start) {
+                        graph.graphics.moveTo(iter2 - start, positionHeight + (-unscaledHalfHeight * (1 - points[iter2][name] / maxPoint) + unscaledHeight));
+                    }
+                    else {
+                        graph.graphics.lineTo(iter2 - start, positionHeight + (-unscaledHalfHeight * (1 - points[iter2][name] / maxPoint) + unscaledHeight));
+                    }
+                }
+//                if (name == "outCount") {
+                graph.graphics.lineTo(iter2 - start, unscaledHeight / 2);
+//                } else {
+//                    graph.graphics.lineTo(iter2 - start, unscaledHeight / 2);
+//                }
+                graph.graphics.endFill();
+            }
+        }
+        ]]>
+	</fx:Script>
+    <s:HGroup width="100%" height="100%" verticalAlign="middle">
+        <s:Spacer width="45%"/>
+        <s:Label id="inRateLabel" color="0x07ff8a" text="" styleName="bigText" alpha="1.0"/>
+        <s:Spacer width="10%"/>
+        <s:Label id="outRateLabel" color="0x3c60f6" text="" styleName="bigText" alpha="1.0"/>
+        <s:Spacer width="45%"/>
+    </s:HGroup>
+    <s:Group id="graph" width="95%" height="95%" top="0"/>
+</s:Group>

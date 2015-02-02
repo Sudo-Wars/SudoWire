@@ -1,0 +1,77 @@
+@namespace mx "library://ns.adobe.com/flex/mx";
+@namespace s "library://ns.adobe.com/flex/spark";
+@namespace ui "com.swfwire.debugger.ui.*";
+
+global {
+    color: #B7BABC;
+    chromeColor: #222222;
+    accentColor: #999999;
+    textRollOverColor: #999999;
+    textSelectedColor: #AAAAAA;
+    focusColor: #a4da0a;
+
+    fontFamily: 'foolite';
+    fontLookup: embeddedCFF;
+    fontSize: 16px;
+
+    contentBackgroundColor: #383733;
+}
+
+@font-face {
+    src: url('../assets/fonts/SourceSansPro-Regular.swf');
+    fontFamily: 'foo';
+}
+
+@font-face {
+    src: url('../assets/fonts/SourceSansPro-Light.swf');
+    fontFamily: 'foolite';
+}
+
+s|WindowedApplication {
+    backgroundColor: #222222;
+    fontSize: 16px;
+}
+
+s|Panel {
+    backgroundColor: #222222;
+    color: #fefff3;
+    fontStyle: normal;
+}
+
+s|DataGrid {
+    alternatingRowColors: #383733, #3f3e3a;
+    vertical-grid-line-color: #000000;
+    rollOverColor: #a4da0a;
+    selectionColor: #0c27a5;
+    color: #fefff3;
+}
+
+s|TextArea {
+    content-background-color: #383733;
+    focus-thickness: 0;
+    fontSize: 14px;
+}
+
+s|Button {
+    corner-radius: 0;
+}
+
+.SearchInputText {
+    fontSize: 14;
+}
+
+.SearchInputClearButton {
+    upImage: Embed("images/x_normal.png");
+    overImage: Embed("images/x_over.png");
+    downImage: Embed("images/x_over.png");
+    disabledImage: Embed("images/x_over.png");
+}
+
+.bigText {
+    fontSize: 32px;
+}
+
+.logo {
+    source: Embed("images/logo.png");
+    source2: Embed("images/logo2.png");
+}

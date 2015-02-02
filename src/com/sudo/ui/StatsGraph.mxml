@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Group xmlns:fx="http://ns.adobe.com/mxml/2009"
+         xmlns:s="library://ns.adobe.com/flex/spark"
+        >
+    <fx:Script>
+		<![CDATA[
+        private var points:Array = [];
+
+        public function addPoint(objectCount:Number, privateMemory:Number, frameRate:Number):void {
+            points.push({objectCount: objectCount, privateMemory: privateMemory, frameRate: frameRate});
+            invalidateDisplayList();
+        }
+
+        override protected function updateDisplayList(unscaledWidth:Number, unscaledHeight:Number):void {
+            super.updateDisplayList(unscaledWidth, unscaledHeight);
+
+            graph.graphics.clear();
+
+            graph.graphics.lineStyle(1, 0x999999);
+            drawProperty('objectCount', unscaledWidth, unscaledHeight);
+
+            graph.graphics.lineStyle(1, 0xFF0000);
+            drawProperty('privateMemory', unscaledWidth, unscaledHeight);
+
+            graph.graphics.lineStyle(1, 0x00FF00);
+            drawProperty('frameRate', unscaledWidth, unscaledHeight);
+
+            if (points.length > 0) {
+                var lastPoint:Object = points[points.length - 1];
+                count.text = lastPoint['objectCount'] + ' objects';
+                memory.text = Math.round(lastPoint['privateMemory'] / 1000) + ' kb';
+                frameRate.text = 'FPS: ' + Math.round(lastPoint['frameRate']);
+            }
+        }
+
+        private function drawProperty(name:String, unscaledWidth:Number, unscaledHeight:Number):void {
+            unscaledHeight -= 10;
+            var start:int = Math.max(0, points.length - unscaledWidth);
+            var maxPoint:int = 0;
+            for (var iter:int = start; iter < points.length; iter++) {
+                maxPoint = Math.max(maxPoint, points[iter][name]) + 1;
+            }
+            if (maxPoint > 0) {
+                for (var iter2:int = start; iter2 < points.length; iter2++) {
+                    if (iter2 == start) {
+                        graph.graphics.moveTo(iter2 - start, unscaledHeight * (1 - points[iter2][name] / maxPoint));
+                    }
+                    else {
+                        graph.graphics.lineTo(iter2 - start, unscaledHeight * (1 - points[iter2][name] / maxPoint));
+                    }
+                }
+            }
+        }
+        ]]>
+	</fx:Script>
+    <s:HGroup width="100%" height="100%">
+        <s:Label id="frameRate" color="#00FF00" text="" styleName="bigText" alpha="0.5"/>
+        <s:Spacer width="100%"/>
+        <s:Label id="memory" color="#FF0000" text="" styleName="bigText" alpha="0.5"/>
+        <s:Spacer width="100%"/>
+        <s:Label id="count" color="#999999" text="" styleName="bigText" alpha="0.5"/>
+    </s:HGroup>
+    <s:Group id="graph" width="95%" height="95%" top="5"/>
+</s:Group>

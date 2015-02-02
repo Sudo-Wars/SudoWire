@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<spark:ButtonSkin xmlns:fx="http://ns.adobe.com/mxml/2009" xmlns:spark="spark.skins.spark.*"
+                  xmlns:s="library://ns.adobe.com/flex/spark"
+        >
+    <fx:Metadata>
+        [HostComponent("com.sudo.ui.LoopButton")]
+    </fx:Metadata>
+
+    <spark:states>
+        <s:State name="loopOne"/>
+        <s:State name="loopAll"/>
+        <s:State name="loopNone"/>
+    </spark:states>
+
+    <s:Rect left="0" right="0" top="0" bottom="0">
+        <s:fill>
+            <s:SolidColor color="0x6b6969" alpha="0"/>
+        </s:fill>
+    </s:Rect>
+
+    <!--<s:Image id="image" styleName="ImageButton" source="{image.getStyle('image')}"/>-->
+    <s:Image id="image" cacheAsBitmap="false" cachePolicy="off"
+             source.loopOne="{getStyle('loopOneImage')}"
+             source.loopAll="{getStyle('loopAllImage')}"
+             source.loopNone="{getStyle('loopNoneImage')}"
+            />
+</spark:ButtonSkin>
