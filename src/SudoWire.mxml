@@ -184,7 +184,7 @@
             }
 
             appUpdater = new ApplicationUpdaterUI();
-            appUpdater.configurationFile = new File('app:/updateConfig.xml');
+            appUpdater.configurationFile = new File('app:/updateConfig.Singleton.xml');
             if (Version.TESTING) {
                 appUpdater.addEventListener(UpdateEvent.INITIALIZED, function (ev:Event):void {
                     appUpdater.checkNow();

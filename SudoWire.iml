@@ -2,7 +2,7 @@
 <module type="Flex" version="4">
   <component name="FlexBuildConfigurationManager" active="OSX">
     <configurations>
-      <configuration name="W32" target-platform="Desktop" main-class="SudoWire" output-file="SudoWireW32.swf" output-folder="$MODULE_DIR$/out/production/SudoWireW32" skip-build="true">
+      <configuration name="W32" target-platform="Desktop" main-class="SudoWire" output-file="SudoWireW32.swf" output-folder="$MODULE_DIR$/../out/production/SudoWireW32" skip-build="true">
         <dependencies target-player="16.0">
           <entries>
             <entry module-name="flexorm" build-configuration-name="FlexORM">
@@ -23,7 +23,7 @@
         <packaging-android />
         <packaging-ios />
       </configuration>
-      <configuration name="OSX" target-platform="Desktop" main-class="SudoWire" output-file="SudoWireOSX.swf" output-folder="$MODULE_DIR$/out/production/SudoWireOSX">
+      <configuration name="OSX" target-platform="Desktop" main-class="SudoWire" output-file="SudoWireOSX.swf" output-folder="$MODULE_DIR$/../out/production/SudoWireOSX">
         <dependencies>
           <entries>
             <entry module-name="flexorm" build-configuration-name="FlexORM">

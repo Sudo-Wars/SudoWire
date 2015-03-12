@@ -1,5 +1,7 @@
 # SudoWars AMF Monitor (aka: SudoWire)
 
+![Screenshot of SudoWire during a play back](https://cloud.githubusercontent.com/assets/10605680/6012268/fd06dcf2-aafa-11e4-939c-2276aa3c16cd.png)
+
 The SudoWars AMF Monitor (aka: SudoWire) is a Action Message Format monitor for debugging inbound and outbound messages. It can act as an inline transparent proxy (supporting 'local' & 'http') or as a side-loaded "T-style" adapter as not to effect the actual traffic that the game client is connecting to and any external proxy that might be in use by the end-user (aka: the gamer).
 
 It also can save an observed session for replaying to the client at a later time. This feature is primary used to test client UI and engine features during development as to not involve the game server in these development cycles. A secondary feature us it can also be used as a way to repro a bug that the developers can not. The the gamer would enable this proxy, run their game till the bug that they are experiencing happened, save the current session and send the resulting session file to the developers for review.
